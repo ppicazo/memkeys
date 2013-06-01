@@ -27,14 +27,6 @@ using namespace std;
 MemcacheCommand MemcacheCommand::create(const Packet& pkt,
                                         const bpf_u_int32 captureAddress)
 {
-  static ssize_t ether_header_sz = sizeof(struct ether_header);
-  static ssize_t ip_sz = sizeof(struct ip);
-  static ssize_t tcphdr_sz = sizeof(struct tcphdr);
-
-  const struct ether_header* ethernetHeader;
-  const struct ip* ipHeader;
-  const struct tcphdr* tcpHeader;
-
   const Packet::Header* pkthdr = &pkt.getHeader();
   const Packet::Data* packet = pkt.getData();
 
@@ -46,14 +38,16 @@ MemcacheCommand MemcacheCommand::create(const Packet& pkt,
 
   // must be an IP packet
   // TODO add support for dumping localhost
-  ethernetHeader = (struct ether_header*)packet;
+  const struct ether_header* ethernetHeader = (struct ether_header*)packet;
+  ssize_t ethernetHeaderSize = sizeof(struct ether_header); //14 bytes
   auto etype = ntohs(ethernetHeader->ether_type);
   if (etype != ETHERTYPE_IP) {
     return MemcacheCommand();
   }
 
   // must be TCP - TODO add support for UDP
-  ipHeader = (struct ip*)(packet + ether_header_sz);
+  const struct ip* ipHeader = (struct ip*)(packet + ethernetHeaderSize);
+  ssize_t ipHeaderSize = ipHeader->ip_hl * 4;
   auto itype = ipHeader->ip_p;
   if (itype != IPPROTO_TCP) {
     return MemcacheCommand();
@@ -69,15 +63,20 @@ MemcacheCommand MemcacheCommand::create(const Packet& pkt,
   // FIXME will remove once we add back the direction parsing
   (void)possible_request;
 
-  tcpHeader = (struct tcphdr*)(packet + ether_header_sz + ip_sz);
+  const struct tcphdr* tcpHeader = (struct tcphdr*)(packet + ethernetHeaderSize 
+                                                    + ipHeaderSize);
+  ssize_t tcpHeaderSize = tcpHeader->doff * 4;
   (void)tcpHeader;
-  data = (u_char*)(packet + ether_header_sz + ip_sz + tcphdr_sz);
-  dataLength = pkthdr->len - (ether_header_sz + ip_sz + tcphdr_sz);
+  data = (u_char*)(packet + ethernetHeaderSize + ipHeaderSize + tcpHeaderSize);
+  dataLength = pkthdr->len - (ethernetHeaderSize + ipHeaderSize + tcpHeaderSize);
   if (dataLength > pkthdr->caplen) {
     dataLength = pkthdr->caplen;
   }
 
   // TODO revert to detecting request/response and doing the right thing
+  if (dataLength <= 0) {
+    return MemcacheCommand();
+  }
   return MemcacheCommand::makeResponse(data, dataLength, sourceAddress);
 }
 
