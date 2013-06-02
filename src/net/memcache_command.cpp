@@ -84,12 +84,18 @@ MemcacheCommand MemcacheCommand::create(const Packet& pkt,
 MemcacheCommand::MemcacheCommand()
   : cmdType_(MC_UNKNOWN),
     sourceAddress_(),
-    commandName_(),
-    objectKey_(),
-    objectSize_(0)
+    commandName_()
 {}
 
 // protected constructor
+MemcacheCommand::MemcacheCommand(const memcache_command_t cmdType,
+                                 const string sourceAddress,
+                                 const string commandName)
+    : cmdType_(cmdType),
+      sourceAddress_(sourceAddress),
+      commandName_(commandName)
+{}
+
 MemcacheCommand::MemcacheCommand(const memcache_command_t cmdType,
                                  const string sourceAddress,
                                  const string commandName,
@@ -97,10 +103,16 @@ MemcacheCommand::MemcacheCommand(const memcache_command_t cmdType,
                                  uint32_t objectSize)
     : cmdType_(cmdType),
       sourceAddress_(sourceAddress),
-      commandName_(commandName),
-      objectKey_(objectKey),
-      objectSize_(objectSize)
-{}
+      commandName_(commandName)
+{
+  pushObject(objectKey, objectSize);
+}
+
+void MemcacheCommand::pushObject(const std::string objectKey, uint32_t objectSize)
+{
+  objectKeyList_.push_back(objectKey);
+  objectSizeList_.push_back(objectSize);
+}
 
 // static protected
 MemcacheCommand MemcacheCommand::makeRequest(u_char*, int, string)
@@ -113,23 +125,33 @@ MemcacheCommand MemcacheCommand::makeRequest(u_char*, int, string)
 MemcacheCommand MemcacheCommand::makeResponse(u_char *data, int length,
                                               string sourceAddress)
 {
-  static pcrecpp::RE re("VALUE (\\S+) \\d+ (\\d+)",
+  static pcrecpp::RE re("(VALUE (\\S+) \\d+ (\\d+))",
                         pcrecpp::RE_Options(PCRE_MULTILINE));
+  static int minimum_length = 11; // 'VALUE a 0 1'
+
+  string whole;
   string key;
   int size = -1;
-  string input = "";
-  for (int i = 0; i < length; i++) {
-    int cid = (int)data[i];
-    if (isprint(cid) || cid == 10 || cid == 13) {
-      input += (char)data[i];
+
+  MemcacheCommand mc(MC_RESPONSE, sourceAddress, "");
+  int offset = 0;
+  while (length - offset >= minimum_length) {
+    //Logger::getLogger("command")->debug(CONTEXT, "%.*s", length, data + offset);
+    if (!re.PartialMatch(data + offset, &whole, &key, &size)) {
+      break;
+    }
+    //Logger::getLogger("command")->debug(whole);
+    //Logger::getLogger("command")->debug(key);
+    if (size >= 0) {
+      mc.pushObject(key, size);
+      offset += whole.length() + 2 + size + 2; // 2 for '\r\n', 2 for '\r\n'
+    } else {
+      break;
     }
   }
-  if (input.length() < 11) {
-    return MemcacheCommand();
-  }
-  re.PartialMatch(input, &key, &size);
-  if (size >= 0) {
-    return MemcacheCommand(MC_RESPONSE, sourceAddress, "", key, size);
+
+  if (mc.getObjectNumber() > 0) {
+    return mc;
   } else {
     return MemcacheCommand();
   }

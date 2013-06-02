@@ -116,7 +116,7 @@ void CaptureEngine::processPackets(int worker_id, mqueue<Packet>* work_queue) {
       MemcacheCommand mc = parse(packet);
       if (mc.isResponse()) {
         enqueue(mc);
-        resCount += 1;
+        resCount += mc.getObjectNumber();
 #ifdef _DEBUG
         logger->trace(CONTEXT,
                       "worker %d, packet %ld, key %s", worker_id, packet.id(),
@@ -172,14 +172,16 @@ MemcacheCommand CaptureEngine::parse(const Packet& packet) const
  */
 void CaptureEngine::enqueue(const MemcacheCommand& mc)
 {
-  Elem e(mc.getObjectKey(), mc.getObjectSize());
+  for (uint32_t idx = 0; idx < mc.getObjectNumber(); ++idx) {
+    Elem e(mc.getObjectKey(idx), mc.getObjectSize(idx));
 #ifdef _DEBUG
-  logger->trace(CONTEXT,
-               "Produced stat: %s, %d", e.first.c_str(), e.second);
+    logger->trace(CONTEXT,
+                 "Produced stat: %s, %d", e.first.c_str(), e.second);
 #endif
-  barrier_lock.lock();
-  barrier->produce(e);
-  barrier_lock.unlock();
+    barrier_lock.lock();
+    barrier->produce(e);
+    barrier_lock.unlock();
+  }
 }
 
 } // end namespace
