@@ -71,6 +71,10 @@ class MemcacheCommand
   static MemcacheCommand makeResponse(u_char *data,
                                       int dataLength,
                                       std::string sourceAddress);
+  static MemcacheCommand parseAsciiResponse(u_char *data, int length,
+                                            std::string sourceAddress);
+  static MemcacheCommand parseBinaryResponse(u_char *data, int length,
+                                             std::string sourceAddress);
 
   const memcache_command_t cmdType_;
   const std::string sourceAddress_;
