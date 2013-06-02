@@ -31,11 +31,17 @@ class MemcacheCommand
   // only when isRequest is true
   std::string getCommandName() const { return commandName_; }
 
+  ssize_t getObjectNumber() const { return objectKeyList_.size(); }
+
   // sometimes when isResponse is true, sometimes when isRequest is true
-  std::string getObjectKey() const { return objectKey_; }
+  std::string getObjectKey(uint32_t idx = 0) const { 
+    return (idx < objectKeyList_.size() ? objectKeyList_[idx] : ""); 
+  }
 
   // only when isResponse is true
-  uint32_t getObjectSize() const { return objectSize_; }
+  uint32_t getObjectSize(uint32_t idx = 0) const { 
+      return (idx < objectSizeList_.size() ? objectSizeList_[idx] : 0); 
+  }
 
   // source address for request
   std::string getSourceAddress() const { return sourceAddress_; }
@@ -49,9 +55,15 @@ class MemcacheCommand
 
   MemcacheCommand(const memcache_command_t cmdType,
                   const std::string sourceAddress,
+                  const std::string commandName);
+
+  MemcacheCommand(const memcache_command_t cmdType,
+                  const std::string sourceAddress,
                   const std::string commandName,
                   const std::string objectKey,
                   uint32_t objectSize);
+
+  void pushObject(const std::string objectKey, uint32_t objectSize);
 
   static MemcacheCommand makeRequest(u_char *data,
                                      int dataLength,
@@ -63,8 +75,8 @@ class MemcacheCommand
   const memcache_command_t cmdType_;
   const std::string sourceAddress_;
   const std::string commandName_;
-  const std::string objectKey_;
-  const uint32_t objectSize_;
+  std::vector<std::string> objectKeyList_;
+  std::vector<uint32_t> objectSizeList_;
 };
 
 } // end namespace
