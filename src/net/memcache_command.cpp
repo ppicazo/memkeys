@@ -11,6 +11,7 @@ extern "C" {
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/if_ether.h>
+#include "protocol_binary.h"
 }
 
 static inline std::string ipv4addressToString(const void * src) {
@@ -121,9 +122,8 @@ MemcacheCommand MemcacheCommand::makeRequest(u_char*, int, string)
   return MemcacheCommand();
 }
 
-// static protected
-MemcacheCommand MemcacheCommand::makeResponse(u_char *data, int length,
-                                              string sourceAddress)
+MemcacheCommand MemcacheCommand::parseAsciiResponse(u_char *data, int length,
+                                                    string sourceAddress)
 {
   static pcrecpp::RE re("(VALUE (\\S+) \\d+ (\\d+))",
                         pcrecpp::RE_Options(PCRE_MULTILINE));
@@ -136,12 +136,9 @@ MemcacheCommand MemcacheCommand::makeResponse(u_char *data, int length,
   MemcacheCommand mc(MC_RESPONSE, sourceAddress, "");
   int offset = 0;
   while (length - offset >= minimum_length) {
-    //Logger::getLogger("command")->debug(CONTEXT, "%.*s", length, data + offset);
     if (!re.PartialMatch(data + offset, &whole, &key, &size)) {
       break;
     }
-    //Logger::getLogger("command")->debug(whole);
-    //Logger::getLogger("command")->debug(key);
     if (size >= 0) {
       mc.pushObject(key, size);
       offset += whole.length() + 2 + size + 2; // 2 for '\r\n', 2 for '\r\n'
@@ -154,6 +151,67 @@ MemcacheCommand MemcacheCommand::makeResponse(u_char *data, int length,
     return mc;
   } else {
     return MemcacheCommand();
+  }
+}
+
+MemcacheCommand MemcacheCommand::parseBinaryResponse(u_char *data, int length,
+                                                     string sourceAddress)
+{
+  static const int HEADER_LENGTH = sizeof(protocol_binary_response_header);
+  static const int MINIMUM_LENGTH = HEADER_LENGTH;
+
+  string key;
+  int valuelen = 0;
+  MemcacheCommand mc(MC_RESPONSE, sourceAddress, "");
+  int offset = 0;
+  while (length - offset >= MINIMUM_LENGTH) {
+    protocol_binary_response_header header;
+    memcpy((char*)&header, data + offset, HEADER_LENGTH);
+    header.response.status = ntohs(header.response.status);
+    header.response.keylen = ntohs(header.response.keylen);
+    header.response.bodylen = ntohl(header.response.bodylen);
+    valuelen = header.response.bodylen - header.response.extlen
+               - header.response.keylen;
+
+    if (header.response.status == PROTOCOL_BINARY_RESPONSE_SUCCESS ||
+        header.response.status == PROTOCOL_BINARY_RESPONSE_AUTH_CONTINUE) {
+      switch (header.response.opcode) {
+      case PROTOCOL_BINARY_CMD_GET:
+      case PROTOCOL_BINARY_CMD_GETQ:
+        Logger::getLogger("command")->debug(CONTEXT, "get reponse without key");
+        break;
+      case PROTOCOL_BINARY_CMD_GETK:
+      case PROTOCOL_BINARY_CMD_GETKQ:
+        key.assign((char*)data + offset + HEADER_LENGTH + header.response.extlen,
+                   header.response.keylen);
+        mc.pushObject(key, valuelen);
+        break;
+      default:
+        break;
+      }
+    }
+
+    offset += HEADER_LENGTH + header.response.bodylen;
+  }
+
+  if (mc.getObjectNumber() > 0) {
+    return mc;
+  } else {
+    return MemcacheCommand();
+  }
+}
+
+// static protected
+MemcacheCommand MemcacheCommand::makeResponse(u_char *data, int length,
+                                              string sourceAddress)
+{
+  if (length < 1) {
+    return MemcacheCommand();
+  }
+  if (data[0] == PROTOCOL_BINARY_RES) {
+    return parseBinaryResponse(data, length, sourceAddress);
+  } else {
+    return parseAsciiResponse(data, length, sourceAddress);
   }
 }
 
